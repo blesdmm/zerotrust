@@ -27,10 +27,10 @@ export async function GET(request) {
     const isClash = searchParams.get('type') === 'clash';
 
     // ==========================================
-    // 2. 超强容错的文本解析
+    // 2. 超强容错的文本解析（修复了之前的漏写数组 Bug）
     // ==========================================
     let subnetsPool = ["162.159.193.5", "162.159.193.12"]; 
-    let portsPool =; 
+    let portsPool = [2408, 500, 1701, 4500]; // 👈 彻底修复这里！补全了默认数组
 
     if (process.env.SUBNETS) {
       const rawSubnets = process.env.SUBNETS.trim();
@@ -72,7 +72,7 @@ export async function GET(request) {
     const randomizedIPs = finalIPs.sort(() => Math.random() - 0.5);
 
     // ==========================================
-    // 4.1 【分支一：测试环境】如果是 Clash 请求 (?type=clash)
+    // 4.1 【分支一】如果是 Clash 请求 (?type=clash)
     // ==========================================
     if (isClash) {
       let proxiesYaml = [];
@@ -147,7 +147,7 @@ rules:
     }
 
     // ==========================================
-    // 4.2 【分支二：生产环境】原本的旧逻辑，100% 输出原汁原味的旧版订阅
+    // 4.2 【分支二】原本的旧逻辑，100% 输出原汁原味的旧版通用订阅
     // ==========================================
     let proxyConfigs = [];
 
@@ -181,6 +181,7 @@ rules:
     });
 
   } catch (err) {
+    // 绝不抛出 500 崩溃，直接把报错返回到浏览器屏幕上
     return new Response(`Runtime Error: ${err.message}`, { status: 200 });
   }
 }
