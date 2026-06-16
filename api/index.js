@@ -1,133 +1,130 @@
-// 如果是 Next.js 项目，请解除下面这行的注释
-// export const runtime = 'edge';
+// ==========================================
+// 1. Zero Trust 密钥资产配置（按需修改）
+// ==========================================
+const TEAM_ACCOUNTS = [
+  {
+    name: "WARP-A",
+    private_key: "n43X5B3CQSEOYaDwAq+6/nRIsdK0SthZbEYtHWPh9Zs=", 
+    local_address: "100.96.0.29/32,2606:4700:cf1:1000::3/128",     
+    public_key: "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",    
+    reserved_str: "229,201,47",
+    mtu: 1280
+  },
+  {
+    name: "WARP-B",
+    private_key: "d3F4nbMk+c/4PMWURhXGGrWS9rsGNhIPh1WyWSJnBYc=", 
+    local_address: "100.96.0.32/32,2606:4700:cf1:1000::6/128",     
+    public_key: "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",    
+    reserved_str: "11,57,110",
+    mtu: 1208
+  }
+];
 
-export async function GET(request) {
-  // ==========================================
-  // 1. Zero Trust 密钥资产配置
-  // ==========================================
-  const TEAM_ACCOUNTS = [
-    {
-      name: "WARP-A",
-      private_key: "n43X5B3CQSEOYaDwAq+6/nRIsdK0SthZbEYtHWPh9Zs=", 
-      local_address: "100.96.0.29/32,2606:4700:cf1:1000::3/128",     
-      public_key: "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",    
-      reserved_str: "229,201,47",
-      mtu: 1280
-    },
-    {
-      name: "WARP-B",
-      private_key: "d3F4nbMk+c/4PMWURhXGGrWS9rsGNhIPh1WyWSJnBYc=", 
-      local_address: "100.96.0.32/32,2606:4700:cf1:1000::6/128",     
-      public_key: "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",    
-      reserved_str: "11,57,110",
-      mtu: 1208
-    }
-  ];
+// ==========================================
+// 2. 统一的变量解析核心逻辑
+// ==========================================
+function parseConfig() {
+  let subnetsPool = ["162.159.193.5", "162.159.193.12"]; // 默认兜底
+  let portsPool =; // 默认兜底
 
-  // ==========================================
-  // 2. 迁移：将 Cloudflare 的 env 替换为 Node 的 process.env
-  // ==========================================
-  let subnetsPool = [
-    "162.159.192.0/24",
-    "162.159.193.0/24",
-    "162.159.204.0/24"
-  ]; 
-  
-  let portsPool =;
-
-  const ENV_SUBNETS = process.env.SUBNETS;
-  const ENV_WG_PORTS = process.env.WG_PORTS;
-
-  if (ENV_SUBNETS) {
-    try {
-      subnetsPool = JSON.parse(ENV_SUBNETS);
-    } catch (e) {
-      subnetsPool = ENV_SUBNETS.split(",").map(s => s.trim()).filter(Boolean);
+  if (process.env.SUBNETS) {
+    const rawSubnets = process.env.SUBNETS.trim();
+    if (rawSubnets.startsWith("[")) {
+      try { subnetsPool = JSON.parse(rawSubnets); } catch (e) { }
+    } else {
+      subnetsPool = rawSubnets.split(/[\s,;\n]+/).map(s => s.trim()).filter(Boolean);
     }
   }
 
-  if (ENV_WG_PORTS) {
-    try {
-      portsPool = JSON.parse(ENV_WG_PORTS).map(Number);
-    } catch (e) {
-      portsPool = ENV_WG_PORTS.split(",").map(p => parseInt(p.trim(), 10)).filter(p => !isNaN(p));
+  if (process.env.WG_PORTS) {
+    const rawPorts = process.env.WG_PORTS.trim();
+    if (rawPorts.startsWith("[")) {
+      try { portsPool = JSON.parse(rawPorts).map(Number); } catch (e) { }
+    } else {
+      portsPool = rawPorts.split(/[\s,;\n]+/).map(p => parseInt(p.trim(), 10)).filter(p => !isNaN(p));
     }
   }
 
-  // ==========================================
-  // 3. 按实际网段大小生成 IP 列表
-  // ==========================================
-  const generateAllEndIPs = () => {
-    const ips = new Set();
-    const ipToLong = (ip) => ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet, 10), 0) >>> 0;
-    const longToIp = (long) => [(long >>> 24) & 255, (long >>> 16) & 255, (long >>> 8) & 255, long & 255].join('.');
-
-    for (const cidr of subnetsPool) {
-      if (!cidr.includes('/')) {
-        ips.add(cidr);
-        continue;
-      }
-      const [baseIp, prefixStr] = cidr.split("/");
-      const prefix = parseInt(prefixStr, 10);
-      if (prefix >= 32) {
-        ips.add(baseIp);
-        continue;
-      }
-      const hostCount = (1 << (32 - prefix)) >>> 0;
-      const mask = (0xFFFFFFFF << (32 - prefix)) >>> 0;
-      const baseLong = ipToLong(baseIp) & mask;
-      const maxExtract = Math.min(hostCount, 256);
-
-      for (let offset = 0; offset < maxExtract; offset++) {
-        if (hostCount > 2 && (offset === 0 || offset === hostCount - 1)) {
-          continue;
-        }
-        ips.add(longToIp((baseLong + offset) >>> 0));
-      }
-    }
-    return Array.from(ips);
-  };
-
-  // ==========================================
-  // 4. 核心分发逻辑
-  // ==========================================
-  const finalIPs = generateAllEndIPs();
-  let proxyConfigs = [];
-
-  for (let i = 0; i < finalIPs.length; i++) {
-    const account = TEAM_ACCOUNTS[i % TEAM_ACCOUNTS.length];
-    const endIp = finalIPs[i]; 
-    const endPort = portsPool[Math.floor(Math.random() * portsPool.length)];
-
-    const safePrivateKey = encodeURIComponent(account.private_key);
-    const safePublicKey = encodeURIComponent(account.public_key);
-    const safeAddress = encodeURIComponent(account.local_address);
-    const safeReserved = encodeURIComponent(account.reserved_str);
-    const nodeName = encodeURIComponent(`⚡ZT-P${endPort}-${account.name}-${i + 1}`);
-
-    const wgLink = `wireguard://${safePrivateKey}@${endIp}:${endPort}?address=${safeAddress}&reserved=${safeReserved}&publickey=${safePublicKey}&mtu=${account.mtu}#${nodeName}`;
-    proxyConfigs.push(wgLink);
-  }
-
-  if (proxyConfigs.length === 0) {
-    return new Response("No valid IP addresses generated. Please check your SUBNETS variable.", { status: 400 });
-  }
-
-  const subscriptionContent = proxyConfigs.join("\n");
-  const base64Response = btoa(unescape(encodeURIComponent(subscriptionContent)));
-
-  // ==========================================
-  // 5. 返回响应
-  // ==========================================
-  return new Response(base64Response, {
-    headers: {
-      "content-type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
-      "Pragma": "no-cache",
-      "Expires": "0"
-    }
-  });
+  return { subnetsPool, portsPool };
 }
 
-// 兼容不支持高级路由环境的纯 Vercel Serverless Function 
-export const POST = GET;
+// ==========================================
+// 3. 处理核心路由（支持 GET / POST 分流）
+// ==========================================
+export async function GET(request) {
+  try {
+    const { subnetsPool, portsPool } = parseConfig();
+
+    // 随机打乱你输入的 IP 列表
+    const randomizedIPs = [...subnetsPool].sort(() => Math.random() - 0.5);
+    let proxyConfigs = [];
+
+    for (let i = 0; i < randomizedIPs.length; i++) {
+      const account = TEAM_ACCOUNTS[i % TEAM_ACCOUNTS.length];
+      const endIp = randomizedIPs[i]; 
+      const endPort = portsPool[Math.floor(Math.random() * portsPool.length)];
+
+      const safePrivateKey = encodeURIComponent(account.private_key);
+      const safePublicKey = encodeURIComponent(account.public_key);
+      const safeAddress = encodeURIComponent(account.local_address);
+      const safeReserved = encodeURIComponent(account.reserved_str);
+      
+      const randomID = Math.floor(1000 + Math.random() * 9000);
+      const nodeName = encodeURIComponent(`⚡ZT-${account.name}-P${endPort}-${i+1}-[${randomID}]`);
+
+      const wgLink = `wireguard://${safePrivateKey}@${endIp}:${endPort}?address=${safeAddress}&reserved=${safeReserved}&publickey=${safePublicKey}&mtu=${account.mtu}#${nodeName}`;
+      proxyConfigs.push(wgLink);
+    }
+
+    if (proxyConfigs.length === 0) {
+      return new Response("No valid IP addresses.", { status: 400 });
+    }
+
+    const subscriptionContent = proxyConfigs.join("\n");
+    const base64Response = btoa(unescape(encodeURIComponent(subscriptionContent)));
+
+    return new Response(base64Response, {
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0"
+      }
+    });
+  } catch (err) {
+    return new Response(`GET Error: ${err.message}`, { status: 500 });
+  }
+}
+
+// 专门接收本地自动化推送的接口
+export async function POST(request) {
+  try {
+    const body = await request.json();
+    const { secret, ips } = body;
+    
+    if (!secret || secret !== process.env.UPDATE_SECRET) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    if (!process.env.VERCEL_PROJECT_ID || !process.env.SUBNETS_ENV_ID || !process.env.VERCEL_AUTH_TOKEN) {
+      return new Response("Missing Vercel API configuration env variables", { status: 500 });
+    }
+
+    const res = await fetch(`https://vercel.com{process.env.VERCEL_PROJECT_ID}/env/${process.env.SUBNETS_ENV_ID}`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${process.env.VERCEL_AUTH_TOKEN}` },
+      body: JSON.stringify({ value: JSON.stringify(ips) })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      return new Response(`Vercel API Error: ${errText}`, { status: res.status });
+    }
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { "content-type": "application/json" }
+    });
+  } catch (e) {
+    return new Response(`POST Error: ${e.message}`, { status: 500 });
+  }
+}
