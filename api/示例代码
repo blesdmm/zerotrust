@@ -1,0 +1,80 @@
+完全可以！你可以把你自己生成出来的、最完整的全套 Clash 外壳配置，直接完美替换掉我代码中不完整的那部分。
+因为我之前为你手写的规则外壳只是一个核心骨架，肯定没有你在转换网站勾选并生成的那么全面。
+为了能让你随心所欲地更换、全选贴入你自己的完整规则，我把代码里的 Clash 拼接区域做成了纯文本拼接结构。你只需要把我代码里 const clashConfig = 后面用 ``（反引号）包裹的那一大段文本，整个删掉并全选替换成你自己的完整 Clash 配置即可。
+但是在替换时，为了能让 Vercel 实时把打乱的随机节点和节点名字完美塞进你的外壳里，你需要严格遵循以下“两个占位符”的潜规则：
+## 🛠️ 怎么替换？只需遵循 2 个占位符法则
+请在 GitHub 网页上编辑你的 api/index.js，找到以 `const clashConfig = `` 开头的一大段文本。将你最完整的 Clash 配置全选复制进去，但在配置里的特定位置，必须替换上以下两个变量插槽：
+## ① 占位符一：\${proxiesYaml.join('\n')}（节点插入点）
+找到你的完整 Clash 配置中 proxies: 这一行的下方，把原本写在那里的固定节点全部删掉，替换成这一行变量插槽：
+
+proxies:
+${proxiesYaml.join('\n')}
+
+## ② 占位符二：\${proxyNames.join('\n')}（策略组绑定点）
+找到你的完整 Clash 配置中的核心策略组（比如“🚀 自动选择”、“🔰 节点选择”或者“PROXY”等组别）。在它们的 proxies: 下方，把原本错误的节点名字删掉，替换成这一行变量插槽：
+
+  - name: 🚀 自动选择
+    type: url-test
+    url: http://cloudflare.com
+    interval: 300
+    tolerance: 50
+    proxies:
+${proxyNames.join('\n')}
+
+  - name: 🔰 节点选择
+    type: select
+    proxies:
+      - 🚀 自动选择
+${proxyNames.join('\n')}
+
+(注：任何你想把这 254 个随机节点塞进去的策略组，都可以在其 proxies: 底下贴上 ${proxyNames.join('\n')}。)
+------------------------------
+## 💻 替换示例：你的代码应该长这样
+
+    // ==========================================
+    // 4. 【分支一：Clash 全本地超大规模分流渲染】
+    // ==========================================
+    if (isClash) {
+      let proxiesYaml = [];
+      let proxyNames = [];
+
+      for (let i = 0; i < randomizedIPs.length; i++) {
+        // ... 前面的随机循环保持不变，用来生成节点 ...
+      }
+
+      // 【核心替换区】：把你复制的最完整外壳，用 ``（反引号）包裹在这里！
+      const clashConfig = `
+port: 7890
+socks-port: 7891
+allow-lan: true
+mode: rule
+log-level: info
+
+proxies:
+\${proxiesYaml.join('\n')}
+
+proxy-groups:
+  - name: 🚀 自动选择
+    type: url-test
+    proxies:
+\${proxyNames.join('\n')}
+
+  - name: 🔰 节点选择
+    type: select
+    proxies:
+      - 🚀 自动选择
+\${proxyNames.join('\n')}
+
+  - name: 📢 Ad Block
+    # ... 把你复制的剩余几万行规则、策略组全选，原封不动粘在下面即可 ...
+`;
+
+      return new Response(clashConfig, {
+        headers: { "content-type": "text/yaml; charset=utf-8" }
+      });
+    }
+
+------------------------------
+如果你手头已经拿到了最完整的完整空壳配置文本，你可以直接在对话框里把你的完整 Clash 配置文本发给我。我来帮你一键把这两个占位符精准地缝合进去，生成一段可以直接闭眼复制的最终成品代码。
+需要我帮你直接缝合一下吗？如果需要，直接把你的完整配置贴给我就行！
+
